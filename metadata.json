@@ -1,0 +1,6 @@
+{
+  "name": "SoundWave - Modern Music Streaming",
+  "description": "Professional music streaming web platform with sleek dashboard, dark mode, high-fidelity audio player, music and artist management, and Spring Boot backend integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
