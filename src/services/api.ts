@@ -23,8 +23,9 @@ const STORAGE_KEY_API_URL = 'harmoniq_backend_url';
 const STORAGE_KEY_USE_MOCK = 'harmoniq_use_mock';
 const STORAGE_KEY_TOKEN = 'harmoniq_auth_token';
 
+// Default Spring Boot base URL with /api/v1
 export const getStoredBackendUrl = (): string => {
-  return localStorage.getItem(STORAGE_KEY_API_URL) || 'http://localhost:8080/api';
+  return localStorage.getItem(STORAGE_KEY_API_URL) || 'http://localhost:8080/api/v1';
 };
 
 export const setStoredBackendUrl = (url: string) => {
@@ -52,7 +53,33 @@ export const setAuthToken = (token: string | null) => {
   }
 };
 
-// Persistence helper for local storage
+// URL builder that prevents duplicate /api or /api/v1 prefix
+export const buildUrl = (rawBase: string, endpoint: string): string => {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  let base = rawBase.trim().replace(/\/+$/, '');
+
+  // If base already contains /api/v1 and endpoint starts with /api/v1, strip prefix
+  if (base.endsWith('/api/v1') && cleanEndpoint.startsWith('/api/v1/')) {
+    return `${base}${cleanEndpoint.slice('/api/v1'.length)}`;
+  }
+
+  // If base ends with /api and endpoint starts with /api/v1, strip /api from base
+  if (base.endsWith('/api') && cleanEndpoint.startsWith('/api/v1/')) {
+    base = base.slice(0, -4);
+  }
+
+  return `${base}${cleanEndpoint}`;
+};
+
+// Local storage cache keys
+const LOCAL_TRACKS_KEY = 'harmoniq_data_tracks';
+const LOCAL_PLAYLISTS_KEY = 'harmoniq_data_playlists';
+const LOCAL_ARTISTS_KEY = 'harmoniq_data_artists';
+const LOCAL_GENRES_KEY = 'harmoniq_data_genres';
+const LOCAL_USERS_KEY = 'harmoniq_data_users';
+const LOCAL_LIKED_KEY = 'harmoniq_liked_track_ids';
+const LOCAL_APPEALS_KEY = 'harmoniq_ban_appeals';
+
 const loadLocal = <T>(key: string, defaultVal: T): T => {
   try {
     const raw = localStorage.getItem(key);
@@ -69,14 +96,6 @@ const saveLocal = <T>(key: string, val: T) => {
     // ignore
   }
 };
-
-const LOCAL_TRACKS_KEY = 'harmoniq_data_tracks';
-const LOCAL_PLAYLISTS_KEY = 'harmoniq_data_playlists';
-const LOCAL_ARTISTS_KEY = 'harmoniq_data_artists';
-const LOCAL_GENRES_KEY = 'harmoniq_data_genres';
-const LOCAL_USERS_KEY = 'harmoniq_data_users';
-const LOCAL_LIKED_KEY = 'harmoniq_liked_track_ids';
-const LOCAL_APPEALS_KEY = 'harmoniq_ban_appeals';
 
 let localTracks: Track[] = loadLocal(LOCAL_TRACKS_KEY, INITIAL_TRACKS);
 let localPlaylists: Playlist[] = loadLocal(LOCAL_PLAYLISTS_KEY, INITIAL_PLAYLISTS);
@@ -106,10 +125,12 @@ async function apiRequest<T>(
     return fallbackFn();
   }
 
-  const baseUrl = getStoredBackendUrl().replace(/\/+$/, '');
+  const base = getStoredBackendUrl();
   const token = getAuthToken();
   const headers = new Headers(options.headers || {});
-  headers.set('Content-Type', 'application/json');
+  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -118,9 +139,10 @@ async function apiRequest<T>(
 
   for (const ep of endpointList) {
     try {
-      const url = `${baseUrl}${ep.startsWith('/') ? ep : `/${ep}`}`;
+      const url = buildUrl(base, ep);
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
+
       const res = await fetch(url, {
         ...options,
         headers,
@@ -130,14 +152,14 @@ async function apiRequest<T>(
 
       if (res.ok) {
         const json = await res.json();
-        // Unwrap APIResponse<T> { data: ... } if present
+        // Unwrap APIResponse<T> { code, message, data } if present
         if (json && typeof json === 'object' && 'data' in json && json.data !== undefined) {
           return json.data as T;
         }
         return json as T;
       }
     } catch {
-      // try next endpoint or fallback
+      // try next variant
     }
   }
 
@@ -145,44 +167,52 @@ async function apiRequest<T>(
 }
 
 export const api = {
+  // Backend Health Ping
   checkBackendHealth: async (): Promise<{ ok: boolean; message: string; latencyMs: number }> => {
     const start = performance.now();
-    const baseUrl = getStoredBackendUrl().replace(/\/+$/, '');
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(`${baseUrl}/health`, {
-        method: 'GET',
-        signal: controller.signal,
-      }).catch(() =>
-        fetch(`${baseUrl.replace('/api', '')}/actuator/health`, {
-          method: 'GET',
-          signal: controller.signal,
-        })
-      );
-      clearTimeout(timeoutId);
+    const rawBase = getStoredBackendUrl();
+    const testEndpoints = [
+      '/api/v1/music/all',
+      '/api/v1/genre/all',
+      '/api/v1/activity/all',
+      '/actuator/health',
+      '/health',
+    ];
 
-      const latencyMs = Math.round(performance.now() - start);
-      if (res && res.ok) {
-        return { ok: true, message: `Connected to HarmoniQ Spring Boot backend (${latencyMs}ms)`, latencyMs };
+    for (const ep of testEndpoints) {
+      try {
+        const url = buildUrl(rawBase, ep);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(url, { method: 'GET', signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        const latencyMs = Math.round(performance.now() - start);
+        if (res.ok) {
+          return {
+            ok: true,
+            message: `Connected to HarmoniQ Spring Boot at ${url} (${latencyMs}ms)`,
+            latencyMs,
+          };
+        }
+      } catch {
+        // try next
       }
-      return { ok: false, message: `Server replied with status ${res?.status || 'unreachable'}`, latencyMs };
-    } catch (err: unknown) {
-      const latencyMs = Math.round(performance.now() - start);
-      const errorMsg = err instanceof Error ? err.message : 'Connection failed';
-      return {
-        ok: false,
-        message: `Could not reach Spring Boot at ${baseUrl} (${errorMsg}). Mock mode active.`,
-        latencyMs,
-      };
     }
+
+    const latencyMs = Math.round(performance.now() - start);
+    return {
+      ok: false,
+      message: `Could not reach Spring Boot at ${rawBase}. Using interactive Mock Mode for instant preview.`,
+      latencyMs,
+    };
   },
 
-  // AuthController endpoints
+  // AuthController (/api/v1/auth/*)
   auth: {
     login: async (email: string, password?: string): Promise<{ token: string; user: User }> => {
       return apiRequest(
-        ['/auth/signin', '/auth/login'],
+        ['/api/v1/auth/signin', '/api/v1/auth/login'],
         {
           method: 'POST',
           body: JSON.stringify({ email, username: email, password: password || '123456' }),
@@ -206,7 +236,7 @@ export const api = {
       role?: UserRole;
     }): Promise<{ token: string; user: User }> => {
       return apiRequest(
-        ['/auth/signup', '/auth/register'],
+        ['/api/v1/auth/signup', '/api/v1/auth/register'],
         {
           method: 'POST',
           body: JSON.stringify({
@@ -241,9 +271,10 @@ export const api = {
       );
     },
 
+    // EmailController (/api/v1/email/*)
     sendOtp: async (email: string): Promise<{ success: boolean; message: string }> => {
       return apiRequest(
-        ['/email/send-otp', '/auth/forgot-password'],
+        ['/api/v1/email/send-otp', '/api/v1/email/send', '/api/v1/auth/forgot-password'],
         { method: 'POST', body: JSON.stringify({ email, recipient: email }) },
         async () => ({ success: true, message: `Verification OTP dispatched to ${email}` })
       );
@@ -251,7 +282,7 @@ export const api = {
 
     verifyOtp: async (otp: string): Promise<{ success: boolean }> => {
       return apiRequest(
-        ['/email/verify-otp', '/auth/validate-otp'],
+        ['/api/v1/email/verify-otp', '/api/v1/email/validate-otp', '/api/v1/auth/validate-otp'],
         { method: 'POST', body: JSON.stringify({ otp }) },
         async () => ({ success: true })
       );
@@ -259,15 +290,16 @@ export const api = {
 
     resetPassword: async (otp: string, newPass: string): Promise<{ success: boolean }> => {
       return apiRequest(
-        ['/auth/reset-password'],
+        ['/api/v1/email/reset-password', '/api/v1/auth/reset-password'],
         { method: 'POST', body: JSON.stringify({ otp, newPassword: newPass }) },
         async () => ({ success: true })
       );
     },
 
+    // UserController (/api/v1/user/*)
     updateProfile: async (userId: string, data: Partial<User>): Promise<User> => {
       return apiRequest(
-        [`/user/update/${userId}`, `/user/${userId}`],
+        [`/api/v1/user/update/${userId}`, `/api/v1/user/${userId}`, `/api/v1/user/update`],
         { method: 'PUT', body: JSON.stringify(data) },
         async () => {
           const idx = localUsers.findIndex((u) => u.id === userId);
@@ -282,15 +314,19 @@ export const api = {
     },
   },
 
-  // MusicController endpoints
+  // MusicController (/api/v1/music/*)
   tracks: {
     getAll: async (): Promise<Track[]> => {
-      return apiRequest(['/music/all', '/tracks'], { method: 'GET' }, () => [...localTracks]);
+      return apiRequest(
+        ['/api/v1/music/all', '/api/v1/music'],
+        { method: 'GET' },
+        () => [...localTracks]
+      );
     },
 
     search: async (query: string): Promise<Track[]> => {
       return apiRequest(
-        [`/music/search?query=${encodeURIComponent(query)}`, `/tracks/search?q=${encodeURIComponent(query)}`],
+        [`/api/v1/music/search?query=${encodeURIComponent(query)}`, `/api/v1/music/search?q=${encodeURIComponent(query)}`],
         { method: 'GET' },
         () => {
           const q = query.toLowerCase();
@@ -305,16 +341,28 @@ export const api = {
       );
     },
 
+    // LikedSongController (/api/v1/liked-song/*)
     getLikedTracks: async (): Promise<Track[]> => {
-      return apiRequest(['/liked/all', '/tracks/liked'], { method: 'GET' }, () => {
-        return localTracks.filter((t) => localLikedIds.includes(t.id));
-      });
+      const activeUserId = localStorage.getItem('harmoniq_active_user_id') || 'usr-1';
+      return apiRequest(
+        [`/api/v1/liked-song/all/${activeUserId}`, '/api/v1/liked-song/all', '/api/v1/liked/all'],
+        { method: 'GET' },
+        () => localTracks.filter((t) => localLikedIds.includes(t.id))
+      );
     },
 
     toggleLike: async (trackId: string): Promise<{ liked: boolean }> => {
+      const activeUserId = localStorage.getItem('harmoniq_active_user_id') || 'usr-1';
       return apiRequest(
-        [`/liked/toggle/${trackId}`, `/tracks/${trackId}/like`],
-        { method: 'POST' },
+        [
+          '/api/v1/liked-song/save',
+          `/api/v1/liked-song/toggle/${trackId}`,
+          `/api/v1/liked/toggle/${trackId}`,
+        ],
+        {
+          method: 'POST',
+          body: JSON.stringify({ userId: activeUserId, musicId: trackId, songId: trackId }),
+        },
         () => {
           const exists = localLikedIds.includes(trackId);
           if (exists) {
@@ -334,7 +382,7 @@ export const api = {
 
     createTrack: async (trackData: Omit<Track, 'id' | 'plays' | 'likes'>): Promise<Track> => {
       return apiRequest(
-        ['/music/add', '/tracks'],
+        ['/api/v1/music/save', '/api/v1/music/add', '/api/v1/music'],
         { method: 'POST', body: JSON.stringify(trackData) },
         () => {
           const newTrack: Track = {
@@ -352,7 +400,7 @@ export const api = {
 
     updateTrack: async (id: string, data: Partial<Track>): Promise<Track> => {
       return apiRequest(
-        [`/music/update/${id}`, `/tracks/${id}`],
+        [`/api/v1/music/update/${id}`, `/api/v1/music/${id}`],
         { method: 'PUT', body: JSON.stringify(data) },
         () => {
           const idx = localTracks.findIndex((t) => t.id === id);
@@ -368,7 +416,7 @@ export const api = {
 
     deleteTrack: async (id: string): Promise<boolean> => {
       return apiRequest(
-        [`/music/delete/${id}`, `/tracks/${id}`],
+        [`/api/v1/music/delete/${id}`, `/api/v1/music/${id}`],
         { method: 'DELETE' },
         () => {
           localTracks = localTracks.filter((t) => t.id !== id);
@@ -380,16 +428,28 @@ export const api = {
     },
   },
 
-  // ArtistController & FollowedArtistController
+  // ArtistController (/api/v1/artist/*) & FollowedArtistController (/api/v1/followed-artist/*)
   artists: {
     getAll: async (): Promise<Artist[]> => {
-      return apiRequest(['/artist/all', '/artists'], { method: 'GET' }, () => [...localArtists]);
+      return apiRequest(
+        ['/api/v1/artist/all', '/api/v1/artist'],
+        { method: 'GET' },
+        () => [...localArtists]
+      );
     },
 
     toggleFollow: async (artistId: string): Promise<{ followed: boolean }> => {
+      const activeUserId = localStorage.getItem('harmoniq_active_user_id') || 'usr-1';
       return apiRequest(
-        [`/artist/follow/${artistId}`, `/artists/${artistId}/follow`],
-        { method: 'POST' },
+        [
+          '/api/v1/followed-artist/save',
+          `/api/v1/artist/follow/${artistId}`,
+          `/api/v1/followed-artist/toggle/${artistId}`,
+        ],
+        {
+          method: 'POST',
+          body: JSON.stringify({ userId: activeUserId, artistId }),
+        },
         () => {
           const art = localArtists.find((a) => a.id === artistId);
           if (art) {
@@ -405,7 +465,7 @@ export const api = {
 
     createArtist: async (data: Omit<Artist, 'id' | 'monthlyListeners' | 'albumsCount' | 'tracksCount'>): Promise<Artist> => {
       return apiRequest(
-        ['/artist/add', '/artists'],
+        ['/api/v1/artist/save', '/api/v1/artist/add', '/api/v1/artist'],
         { method: 'POST', body: JSON.stringify(data) },
         () => {
           const newArtist: Artist = {
@@ -425,7 +485,7 @@ export const api = {
 
     updateArtist: async (id: string, data: Partial<Artist>): Promise<Artist> => {
       return apiRequest(
-        [`/artist/update/${id}`, `/artists/${id}`],
+        [`/api/v1/artist/update/${id}`, `/api/v1/artist/${id}`],
         { method: 'PUT', body: JSON.stringify(data) },
         () => {
           const idx = localArtists.findIndex((a) => a.id === id);
@@ -441,7 +501,7 @@ export const api = {
 
     deleteArtist: async (id: string): Promise<boolean> => {
       return apiRequest(
-        [`/artist/delete/${id}`, `/artists/${id}`],
+        [`/api/v1/artist/delete/${id}`, `/api/v1/artist/${id}`],
         { method: 'DELETE' },
         () => {
           localArtists = localArtists.filter((a) => a.id !== id);
@@ -452,16 +512,32 @@ export const api = {
     },
   },
 
-  // PlaylistController & PlaylistSongController
+  // PlaylistController (/api/v1/playlist/*) & PlaylistSongController (/api/v1/playlist-song/*)
   playlists: {
     getAll: async (): Promise<Playlist[]> => {
-      return apiRequest(['/playlist/all', '/playlists'], { method: 'GET' }, () => [...localPlaylists]);
+      const activeUserId = localStorage.getItem('harmoniq_active_user_id') || 'usr-1';
+      return apiRequest(
+        [`/api/v1/playlist/user/${activeUserId}`, '/api/v1/playlist/all', '/api/v1/playlist'],
+        { method: 'GET' },
+        () => [...localPlaylists]
+      );
     },
 
     create: async (data: { title: string; description: string; coverUrl?: string; isPublic?: boolean }): Promise<Playlist> => {
+      const activeUserId = localStorage.getItem('harmoniq_active_user_id') || 'usr-1';
       return apiRequest(
-        ['/playlist/create', '/playlists'],
-        { method: 'POST', body: JSON.stringify(data) },
+        ['/api/v1/playlist/save', '/api/v1/playlist/create', '/api/v1/playlist'],
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            title: data.title,
+            name: data.title,
+            description: data.description,
+            coverUrl: data.coverUrl,
+            userId: activeUserId,
+            isPublic: data.isPublic ?? true,
+          }),
+        },
         () => {
           const newPl: Playlist = {
             id: `pl-${Date.now()}`,
@@ -471,7 +547,7 @@ export const api = {
               data.coverUrl ||
               'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80',
             creatorName: 'Ivan Jayasooriya',
-            creatorId: 'usr-1',
+            creatorId: activeUserId,
             isPublic: data.isPublic ?? true,
             trackCount: 0,
             tracks: [],
@@ -486,7 +562,7 @@ export const api = {
 
     delete: async (id: string): Promise<boolean> => {
       return apiRequest(
-        [`/playlist/delete/${id}`, `/playlists/${id}`],
+        [`/api/v1/playlist/delete/${id}`, `/api/v1/playlist/${id}`],
         { method: 'DELETE' },
         () => {
           localPlaylists = localPlaylists.filter((p) => p.id !== id);
@@ -498,8 +574,11 @@ export const api = {
 
     addTrack: async (playlistId: string, track: Track): Promise<Playlist> => {
       return apiRequest(
-        ['/playlist/song/add', `/playlists/${playlistId}/tracks`],
-        { method: 'POST', body: JSON.stringify({ playlistId, songId: track.id, trackId: track.id }) },
+        ['/api/v1/playlist-song/save', '/api/v1/playlist-song/add'],
+        {
+          method: 'POST',
+          body: JSON.stringify({ playlistId, musicId: track.id, songId: track.id }),
+        },
         () => {
           const pl = localPlaylists.find((p) => p.id === playlistId);
           if (pl) {
@@ -517,7 +596,10 @@ export const api = {
 
     removeTrack: async (playlistId: string, trackId: string): Promise<Playlist> => {
       return apiRequest(
-        [`/playlist/song/delete/${playlistId}/${trackId}`, `/playlists/${playlistId}/tracks/${trackId}`],
+        [
+          `/api/v1/playlist-song/delete/${playlistId}/${trackId}`,
+          `/api/v1/playlist-song/delete?playlistId=${playlistId}&songId=${trackId}`,
+        ],
         { method: 'DELETE' },
         () => {
           const pl = localPlaylists.find((p) => p.id === playlistId);
@@ -533,17 +615,19 @@ export const api = {
     },
   },
 
-  // GenreController
+  // GenreController (/api/v1/genre/*)
   genres: {
     getAll: async (): Promise<Genre[]> => {
-      return apiRequest(['/genre/all', '/genre/with-track-count', '/genres'], { method: 'GET' }, () => [
-        ...localGenres,
-      ]);
+      return apiRequest(
+        ['/api/v1/genre/all', '/api/v1/genre/with-track-count', '/api/v1/genre'],
+        { method: 'GET' },
+        () => [...localGenres]
+      );
     },
 
     create: async (data: Omit<Genre, 'id' | 'trackCount'>): Promise<Genre> => {
       return apiRequest(
-        ['/genre/add', '/genres'],
+        ['/api/v1/genre/save', '/api/v1/genre/add', '/api/v1/genre'],
         { method: 'POST', body: JSON.stringify(data) },
         () => {
           const newG: Genre = { ...data, id: `g-${Date.now()}`, trackCount: 0 };
@@ -556,7 +640,7 @@ export const api = {
 
     delete: async (id: string): Promise<boolean> => {
       return apiRequest(
-        [`/genre/delete/${id}`, `/genres/${id}`],
+        [`/api/v1/genre/delete/${id}`, `/api/v1/genre/${id}`],
         { method: 'DELETE' },
         () => {
           localGenres = localGenres.filter((g) => g.id !== id);
@@ -567,24 +651,33 @@ export const api = {
     },
   },
 
-  // UserController & UserBanController & ActivityController
+  // UserController, UserBanController, ActivityController (/api/v1/*)
   admin: {
+    // ActivityController (/api/v1/activity/*)
     getStats: async (): Promise<DashboardStats> => {
-      return apiRequest(['/activity/all', '/admin/stats'], { method: 'GET' }, () => ({
-        ...INITIAL_DASHBOARD_STATS,
-        totalTracks: localTracks.length + 45200,
-        totalArtists: localArtists.length + 1835,
-        totalUsers: localUsers.length + 248916,
-      }));
+      return apiRequest(
+        ['/api/v1/activity/all', '/api/v1/activity'],
+        { method: 'GET' },
+        () => ({
+          ...INITIAL_DASHBOARD_STATS,
+          totalTracks: localTracks.length + 45200,
+          totalArtists: localArtists.length + 1835,
+          totalUsers: localUsers.length + 248916,
+        })
+      );
     },
 
     getUsers: async (): Promise<User[]> => {
-      return apiRequest(['/user/all', '/admin/users'], { method: 'GET' }, () => [...localUsers]);
+      return apiRequest(
+        ['/api/v1/user/all', '/api/v1/user'],
+        { method: 'GET' },
+        () => [...localUsers]
+      );
     },
 
     updateUserRole: async (userId: string, role: UserRole): Promise<User> => {
       return apiRequest(
-        [`/user/role/${userId}`, `/admin/users/${userId}/role`],
+        [`/api/v1/user/role/${userId}`, `/api/v1/user/update/${userId}`],
         { method: 'PUT', body: JSON.stringify({ role }) },
         () => {
           const user = localUsers.find((u) => u.id === userId);
@@ -598,16 +691,23 @@ export const api = {
       );
     },
 
+    // UserBanController (/api/v1/ban/* or /api/v1/user-ban/*)
     getBannedUsers: async (): Promise<User[]> => {
-      return apiRequest(['/ban/all', '/admin/users/banned'], { method: 'GET' }, () =>
-        localUsers.filter((u) => u.isBanned)
+      return apiRequest(
+        ['/api/v1/ban/all', '/api/v1/user-ban/all', '/api/v1/ban'],
+        { method: 'GET' },
+        () => localUsers.filter((u) => u.isBanned)
       );
     },
 
     banUser: async (userId: string, reason: string): Promise<User> => {
+      const adminId = localStorage.getItem('harmoniq_active_user_id') || 'usr-1';
       return apiRequest(
-        ['/ban/user', `/admin/users/${userId}/ban`],
-        { method: 'POST', body: JSON.stringify({ userId, reason }) },
+        ['/api/v1/ban/save', '/api/v1/user-ban/save', '/api/v1/ban/user'],
+        {
+          method: 'POST',
+          body: JSON.stringify({ userId, reason, adminId }),
+        },
         () => {
           const user = localUsers.find((u) => u.id === userId);
           if (user) {
@@ -624,7 +724,7 @@ export const api = {
 
     unbanUser: async (userId: string): Promise<User> => {
       return apiRequest(
-        [`/ban/unban/${userId}`, `/admin/users/${userId}/unban`],
+        [`/api/v1/ban/unban/${userId}`, `/api/v1/user-ban/unban/${userId}`],
         { method: 'POST' },
         () => {
           const user = localUsers.find((u) => u.id === userId);
@@ -640,9 +740,10 @@ export const api = {
       );
     },
 
+    // BanAppealDTO (/api/v1/ban/appeal)
     submitBanAppeal: async (data: { userId: string; username: string; reason: string }): Promise<BanAppeal> => {
       return apiRequest(
-        ['/ban/appeal'],
+        ['/api/v1/ban/appeal', '/api/v1/user-ban/appeal'],
         { method: 'POST', body: JSON.stringify(data) },
         () => {
           const appeal: BanAppeal = {
@@ -661,17 +762,17 @@ export const api = {
     },
   },
 
-  // AI Chat (ChatController.java)
+  // ChatController (/api/v1/chat/*)
   chat: {
     sendPrompt: async (message: string): Promise<{ reply: string }> => {
       return apiRequest(
-        ['/chat', '/api/chat'],
+        ['/api/v1/chat', '/api/v1/chat/send'],
         { method: 'POST', body: JSON.stringify({ message, prompt: message }) },
         async () => {
           const replies = [
-            `Based on your taste in synthwave and ambient beats, you will love "Neon Skyline" by Aether Echoes! Would you like me to queue it up?`,
-            `I recommend diving into Solaris Drift's "Midnight Rain In Shibuya" for a focused study or work session.`,
-            `Nova Eclipse just released "Starlight Gravity" in ultra lossless master quality. Great choice for high-energy afternoons!`,
+            `Based on your listening history, "Neon Skyline" by Aether Echoes matches your sonic profile. Enjoy the high-fidelity master!`,
+            `For a deep focus flow session, "Midnight Rain In Shibuya" by Solaris Drift is recommended.`,
+            `Nova Eclipse's "Starlight Gravity" is currently topping the global charts in lossless quality.`,
           ];
           return { reply: replies[Math.floor(Math.random() * replies.length)] };
         }
