@@ -192,6 +192,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCurrentTime(0);
     setDuration(track.duration);
 
+    // Record to Spring Boot RecentSongController (/api/v1/recent-song/save)
+    api.recent.recordRecent(track.id);
+
     if (newQueue && newQueue.length > 0) {
       setQueue(newQueue);
       const idx = newQueue.findIndex((t) => t.id === track.id);

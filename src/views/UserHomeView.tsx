@@ -27,20 +27,23 @@ export const UserHomeView: React.FC<UserHomeViewProps> = ({
   const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
+  const [recentTracks, setRecentTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [allTracks, allPlaylists, allArtists] = await Promise.all([
+        const [allTracks, allPlaylists, allArtists, recents] = await Promise.all([
           api.tracks.getAll(),
           api.playlists.getAll(),
           api.artists.getAll(),
+          api.recent.getRecent(),
         ]);
         setTracks(allTracks);
         setPlaylists(allPlaylists);
         setArtists(allArtists);
+        setRecentTracks(recents);
       } catch (err) {
         console.error('Failed to load home data', err);
       } finally {
@@ -167,6 +170,52 @@ export const UserHomeView: React.FC<UserHomeViewProps> = ({
           ))}
         </div>
       </section>
+
+      {/* Jump Back In / Recently Played (RecentSongController) */}
+      {recentTracks.length > 0 && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-cyan-400" />
+              Recently Played
+            </h2>
+            <span className="text-xs font-mono text-zinc-500">Live Sync</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {recentTracks.slice(0, 6).map((track) => (
+              <div
+                key={track.id}
+                onClick={() => playTrack(track, recentTracks)}
+                className="group p-3 rounded-2xl bg-zinc-900/40 hover:bg-zinc-800/60 border border-zinc-800/80 cursor-pointer transition flex flex-col justify-between"
+              >
+                <div className="relative aspect-square rounded-xl overflow-hidden mb-2.5">
+                  <img
+                    src={track.coverUrl}
+                    alt={track.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition"
+                  />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTrack(track, recentTracks);
+                    }}
+                    className="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-emerald-500 text-black flex items-center justify-center opacity-0 group-hover:opacity-100 hover:scale-105 active:scale-95 transition shadow-lg"
+                    title="Play track"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-black ml-0.5" />
+                  </button>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-white truncate group-hover:text-emerald-400">
+                    {track.title}
+                  </p>
+                  <p className="text-[11px] text-zinc-400 truncate">{track.artist}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Trending Tracks */}
       <section className="space-y-4">
