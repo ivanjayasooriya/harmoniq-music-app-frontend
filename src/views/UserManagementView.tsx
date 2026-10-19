@@ -142,7 +142,6 @@ export const UserManagementView: React.FC = () => {
                   className="bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 rounded-lg px-2.5 py-1 focus:outline-none focus:border-emerald-500"
                 >
                   <option value="USER">USER</option>
-                  <option value="ARTIST">ARTIST</option>
                   <option value="ADMIN">ADMIN</option>
                 </select>
               </div>

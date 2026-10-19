@@ -18,10 +18,10 @@ import {
   Users,
 } from 'lucide-react';
 import { api } from '../services/api';
-import { DashboardStats, ViewMode } from '../types';
+import { AdminView, DashboardStats } from '../types';
 
 interface AdminDashboardViewProps {
-  onNavigate: (view: ViewMode) => void;
+  onNavigate: (view: AdminView) => void;
   onOpenBackendModal: () => void;
 }
 
@@ -80,7 +80,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </button>
 
           <button
-            onClick={() => onNavigate('music-management')}
+            onClick={() => onNavigate('music')}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold transition shadow-lg shadow-emerald-500/20 active:scale-95"
           >
             <Plus className="w-4 h-4" />
@@ -244,7 +244,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           <h3 className="font-bold text-base text-white">Studio Management Modules</h3>
           <div className="grid grid-cols-2 gap-3">
             <button
-              onClick={() => onNavigate('music-management')}
+              onClick={() => onNavigate('music')}
               className="p-4 rounded-2xl bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/60 text-left transition space-y-2 group"
             >
               <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 w-fit group-hover:scale-105 transition">
@@ -257,7 +257,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </button>
 
             <button
-              onClick={() => onNavigate('artist-management')}
+              onClick={() => onNavigate('artists')}
               className="p-4 rounded-2xl bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/60 text-left transition space-y-2 group"
             >
               <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 w-fit group-hover:scale-105 transition">
@@ -270,7 +270,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </button>
 
             <button
-              onClick={() => onNavigate('user-management')}
+              onClick={() => onNavigate('users')}
               className="p-4 rounded-2xl bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/60 text-left transition space-y-2 group"
             >
               <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 w-fit group-hover:scale-105 transition">
@@ -283,7 +283,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </button>
 
             <button
-              onClick={() => onNavigate('banned-users')}
+              onClick={() => onNavigate('banned')}
               className="p-4 rounded-2xl bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/60 text-left transition space-y-2 group"
             >
               <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 w-fit group-hover:scale-105 transition">

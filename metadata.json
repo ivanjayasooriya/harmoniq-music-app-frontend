@@ -1,6 +1,6 @@
 {
-  "name": "SoundWave - Modern Music Streaming",
-  "description": "Professional music streaming web platform with sleek dashboard, dark mode, high-fidelity audio player, music and artist management, and Spring Boot backend integration.",
+  "name": "HarmoniQ - Premium Music Streaming",
+  "description": "HarmoniQ is a premier high-fidelity music streaming platform with dedicated Listener and Admin Backstage portals, real-time Spring Boot REST integration, soundwave audio engine, and catalog management.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

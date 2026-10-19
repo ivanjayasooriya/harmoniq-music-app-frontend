@@ -371,7 +371,7 @@ export const INITIAL_USERS: User[] = [
     email: 'marcus.producer@example.com',
     fullName: 'Marcus Sterling',
     avatarUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=400&q=80',
-    role: 'ARTIST',
+    role: 'USER',
     isBanned: false,
     plan: 'Premium HiFi',
     favoriteGenres: ['R&B & Neo-Soul', 'Hip-Hop & Trap'],

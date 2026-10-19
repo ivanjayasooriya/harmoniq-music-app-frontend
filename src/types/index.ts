@@ -1,3 +1,9 @@
+export interface APIResponse<T> {
+  code: number | string;
+  message: string;
+  data: T;
+}
+
 export interface Track {
   id: string;
   title: string;
@@ -42,7 +48,7 @@ export interface Playlist {
   createdAt: string;
 }
 
-export type UserRole = 'USER' | 'ADMIN' | 'ARTIST';
+export type UserRole = 'USER' | 'ADMIN';
 
 export interface User {
   id: string;
@@ -67,7 +73,23 @@ export interface Genre {
   color: string;
   trackCount: number;
   description: string;
-  iconName?: string;
+}
+
+export interface BanAppeal {
+  id: string;
+  userId: string;
+  username: string;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  createdAt: string;
+}
+
+export interface ActivityItem {
+  id: string;
+  type: 'upload' | 'ban' | 'verify' | 'user' | 'stream';
+  description: string;
+  timestamp: string;
+  user?: string;
 }
 
 export interface DashboardStats {
@@ -78,16 +100,12 @@ export interface DashboardStats {
   platformRevenue: number;
   dailyPlays: { day: string; plays: number; streams: number }[];
   genreBreakdown: { genre: string; percentage: number; color: string }[];
-  recentActivities: {
-    id: string;
-    type: 'upload' | 'ban' | 'verify' | 'user' | 'stream';
-    description: string;
-    timestamp: string;
-    user?: string;
-  }[];
+  recentActivities: ActivityItem[];
 }
 
-export type ViewMode =
+export type ActivePortal = 'user' | 'admin' | 'auth' | 'banned';
+
+export type UserView =
   | 'home'
   | 'search'
   | 'playlists'
@@ -96,13 +114,14 @@ export type ViewMode =
   | 'artists'
   | 'artist-detail'
   | 'profile'
-  | 'admin-dashboard'
-  | 'music-management'
-  | 'artist-management'
-  | 'user-management'
-  | 'banned-users'
-  | 'genre-management'
-  | 'ban-page'
-  | 'sign-in'
-  | 'sign-up'
-  | 'forgot-password';
+  | 'ai-chat';
+
+export type AdminView =
+  | 'dashboard'
+  | 'music'
+  | 'artists'
+  | 'users'
+  | 'banned'
+  | 'genres';
+
+export type AuthMode = 'sign-in' | 'sign-up' | 'forgot-password';

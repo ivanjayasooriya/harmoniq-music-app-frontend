@@ -1,20 +1,22 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api, getAuthToken, setAuthToken } from '../services/api';
-import { User, UserRole } from '../types';
+import { ActivePortal, User, UserRole } from '../types';
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean;
   isAdmin: boolean;
-  isArtist: boolean;
-  login: (email: string, password?: string) => Promise<void>;
+  isBanned: boolean;
+  activePortal: ActivePortal;
+  setActivePortal: (portal: ActivePortal) => void;
+  login: (email: string, password?: string, targetPortal?: 'user' | 'admin') => Promise<void>;
   register: (data: { email: string; username: string; fullName: string; role?: UserRole }) => Promise<void>;
   logout: () => void;
-  switchRole: (role: UserRole) => Promise<void>;
   toggleBanStatus: (reason?: string) => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
-  reloadUser: () => Promise<void>;
+  switchToAdminPortal: () => boolean;
+  switchToUserPortal: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -22,51 +24,102 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(getAuthToken());
+  const [activePortal, setActivePortal] = useState<ActivePortal>('user');
 
-  // Initialize session
+  // Load session from storage
   useEffect(() => {
     const init = async () => {
       try {
         const users = await api.admin.getUsers();
-        // default to first active user or admin
-        const savedUserId = localStorage.getItem('soundwave_active_user_id');
+        const savedUserId = localStorage.getItem('harmoniq_active_user_id');
         const active = users.find((u) => u.id === savedUserId) || users[0];
+
         if (active) {
           setUser(active);
-          localStorage.setItem('soundwave_active_user_id', active.id);
+          localStorage.setItem('harmoniq_active_user_id', active.id);
+
+          if (active.isBanned) {
+            setActivePortal('banned');
+          } else {
+            const savedPortal = localStorage.getItem('harmoniq_active_portal') as ActivePortal;
+            if (savedPortal === 'admin' && active.role === 'ADMIN') {
+              setActivePortal('admin');
+            } else {
+              setActivePortal('user');
+            }
+          }
         }
       } catch (err) {
-        console.error('Failed to init auth user', err);
+        console.error('Failed to init auth session', err);
       }
     };
     init();
   }, []);
 
-  const login = async (email: string, password?: string) => {
+  const handleSetPortal = (portal: ActivePortal) => {
+    setActivePortal(portal);
+    localStorage.setItem('harmoniq_active_portal', portal);
+  };
+
+  const login = async (
+    email: string,
+    password?: string,
+    targetPortal: 'user' | 'admin' = 'user'
+  ) => {
     const res = await api.auth.login(email, password);
     setUser(res.user);
     setToken(res.token);
-    localStorage.setItem('soundwave_active_user_id', res.user.id);
+    localStorage.setItem('harmoniq_active_user_id', res.user.id);
+
+    if (res.user.isBanned) {
+      handleSetPortal('banned');
+      return;
+    }
+
+    if (targetPortal === 'admin') {
+      if (res.user.role === 'ADMIN') {
+        handleSetPortal('admin');
+      } else {
+        // Not an admin
+        handleSetPortal('user');
+      }
+    } else {
+      handleSetPortal('user');
+    }
   };
 
-  const register = async (data: { email: string; username: string; fullName: string; role?: UserRole }) => {
+  const register = async (data: {
+    email: string;
+    username: string;
+    fullName: string;
+    role?: UserRole;
+  }) => {
     const res = await api.auth.register(data);
     setUser(res.user);
     setToken(res.token);
-    localStorage.setItem('soundwave_active_user_id', res.user.id);
+    localStorage.setItem('harmoniq_active_user_id', res.user.id);
+    handleSetPortal('user');
   };
 
   const logout = () => {
     setUser(null);
     setToken(null);
     setAuthToken(null);
-    localStorage.removeItem('soundwave_active_user_id');
+    localStorage.removeItem('harmoniq_active_user_id');
+    localStorage.removeItem('harmoniq_active_portal');
+    handleSetPortal('auth');
   };
 
-  const switchRole = async (role: UserRole) => {
-    if (!user) return;
-    const updated = await api.admin.updateUserRole(user.id, role);
-    setUser({ ...updated });
+  const switchToAdminPortal = (): boolean => {
+    if (user?.role === 'ADMIN') {
+      handleSetPortal('admin');
+      return true;
+    }
+    return false;
+  };
+
+  const switchToUserPortal = () => {
+    handleSetPortal('user');
   };
 
   const toggleBanStatus = async (reason?: string) => {
@@ -74,12 +127,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (user.isBanned) {
       const updated = await api.admin.unbanUser(user.id);
       setUser({ ...updated });
+      handleSetPortal(updated.role === 'ADMIN' ? 'admin' : 'user');
     } else {
       const updated = await api.admin.banUser(
         user.id,
-        reason || 'Violation of Community Terms & Music Streaming Policy'
+        reason || 'Policy infraction reported by HarmoniQ Security Center'
       );
       setUser({ ...updated });
+      handleSetPortal('banned');
     }
   };
 
@@ -89,13 +144,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser({ ...updated });
   };
 
-  const reloadUser = async () => {
-    if (!user) return;
-    const users = await api.admin.getUsers();
-    const found = users.find((u) => u.id === user.id);
-    if (found) setUser(found);
-  };
-
   return (
     <AuthContext.Provider
       value={{
@@ -103,14 +151,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         isAuthenticated: !!user,
         isAdmin: user?.role === 'ADMIN',
-        isArtist: user?.role === 'ARTIST' || user?.role === 'ADMIN',
+        isBanned: !!user?.isBanned,
+        activePortal,
+        setActivePortal: handleSetPortal,
         login,
         register,
         logout,
-        switchRole,
         toggleBanStatus,
         updateProfile,
-        reloadUser,
+        switchToAdminPortal,
+        switchToUserPortal,
       }}
     >
       {children}

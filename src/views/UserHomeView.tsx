@@ -10,10 +10,10 @@ import {
 } from 'lucide-react';
 import { useAudio } from '../context/AudioContext';
 import { api } from '../services/api';
-import { Artist, Playlist, Track, ViewMode } from '../types';
+import { Artist, Playlist, Track, UserView } from '../types';
 
 interface UserHomeViewProps {
-  onNavigate: (view: ViewMode) => void;
+  onNavigate: (view: UserView) => void;
   onSelectPlaylist: (playlist: Playlist) => void;
   onSelectArtist: (artist: Artist) => void;
 }
@@ -81,7 +81,7 @@ export const UserHomeView: React.FC<UserHomeViewProps> = ({
           <div className="relative z-10 flex-1 space-y-4 text-center md:text-left">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>SOUNDWAVE EDITORIAL SPOTLIGHT</span>
+              <span>HARMONIQ EDITORIAL SPOTLIGHT</span>
             </div>
             <div>
               <h2 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight">

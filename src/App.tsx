@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
+import { AdminNavbar } from './components/AdminNavbar';
+import { AdminSidebar } from './components/AdminSidebar';
 import { BackendConfigModal } from './components/BackendConfigModal';
 import { FullscreenPlayer } from './components/FullscreenPlayer';
 import { LyricsModal } from './components/LyricsModal';
 import { Navbar } from './components/Navbar';
 import { PlayerBar } from './components/PlayerBar';
 import { QueueDrawer } from './components/QueueDrawer';
-import { Sidebar } from './components/Sidebar';
+import { UserSidebar } from './components/UserSidebar';
 import { AudioProvider } from './context/AudioContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
-import { Artist, Playlist, ViewMode } from './types';
+import { AdminView, Artist, AuthMode, Playlist, UserView } from './types';
 import { AdminDashboardView } from './views/AdminDashboardView';
+import { AIChatView } from './views/AIChatView';
 import { ArtistManagementView } from './views/ArtistManagementView';
 import { ArtistProfileView } from './views/ArtistProfileView';
 import { ArtistsView } from './views/ArtistsView';
@@ -28,63 +31,105 @@ import { UserManagementView } from './views/UserManagementView';
 import { UserProfileView } from './views/UserProfileView';
 
 function AppContent() {
-  const { user } = useAuth();
-  const [currentView, setCurrentView] = useState<ViewMode>('home');
+  const { user, activePortal } = useAuth();
+
+  // Navigation states for separated portals
+  const [userView, setUserView] = useState<UserView>('home');
+  const [adminView, setAdminView] = useState<AdminView>('dashboard');
+  const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
+
+  // Shared entity selection
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
+
+  // Search & Modals
   const [searchQuery, setSearchQuery] = useState('');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isBackendModalOpen, setIsBackendModalOpen] = useState(false);
   const [isCreatePlaylistModalOpen, setIsCreatePlaylistModalOpen] = useState(false);
 
-  // If user account is marked banned, immediately display the Ban Page
-  if (user?.isBanned && currentView !== 'ban-page') {
+  // 1. BANNED PORTAL (Account suspended)
+  if (activePortal === 'banned' || user?.isBanned) {
+    return <BanPageView />;
+  }
+
+  // 2. AUTHENTICATION PORTAL (Choose Listener or Admin login)
+  if (activePortal === 'auth' || !user) {
+    return <AuthViews mode={authMode} onSwitchMode={setAuthMode} />;
+  }
+
+  // 3. ADMIN BACKSTAGE PORTAL (Separated management experience)
+  if (activePortal === 'admin') {
     return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-center">
-        <BanPageView onNavigate={setCurrentView} />
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
+        <div className="flex-1 flex overflow-hidden">
+          {/* Admin Dedicated Sidebar */}
+          <AdminSidebar
+            currentView={adminView}
+            onNavigate={setAdminView}
+            isOpenMobile={isMobileSidebarOpen}
+            onCloseMobile={() => setIsMobileSidebarOpen(false)}
+            onOpenBackendModal={() => setIsBackendModalOpen(true)}
+          />
+
+          {/* Admin Main Body */}
+          <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto bg-zinc-950">
+            <AdminNavbar
+              currentView={adminView}
+              onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
+              onOpenBackendModal={() => setIsBackendModalOpen(true)}
+            />
+
+            <main className="flex-1 px-4 md:px-8 py-6 pb-28 max-w-7xl w-full mx-auto">
+              {adminView === 'dashboard' && (
+                <AdminDashboardView
+                  onNavigate={setAdminView}
+                  onOpenBackendModal={() => setIsBackendModalOpen(true)}
+                />
+              )}
+              {adminView === 'music' && <MusicManagementView />}
+              {adminView === 'artists' && <ArtistManagementView />}
+              {adminView === 'users' && <UserManagementView />}
+              {adminView === 'banned' && <BannedUsersView />}
+              {adminView === 'genres' && <GenreManagementView />}
+            </main>
+          </div>
+        </div>
+
+        {/* Player bar available in admin if previewing audio tracks */}
+        <PlayerBar />
+
+        {/* Backend configuration modal */}
+        <BackendConfigModal
+          isOpen={isBackendModalOpen}
+          onClose={() => setIsBackendModalOpen(false)}
+        />
       </div>
     );
   }
 
-  // Auth pages (full page centered)
-  if (currentView === 'sign-in' || currentView === 'sign-up' || currentView === 'forgot-password') {
-    return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-center">
-        <AuthViews mode={currentView} onNavigate={setCurrentView} />
-      </div>
-    );
-  }
-
-  // If view is ban-page directly (from manual preview)
-  if (currentView === 'ban-page') {
-    return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-center">
-        <BanPageView onNavigate={setCurrentView} />
-      </div>
-    );
-  }
-
+  // 4. LISTENER / USER PORTAL (Clean, high-fidelity music streaming app)
   const handleSelectPlaylist = (playlist: Playlist) => {
     setSelectedPlaylist(playlist);
-    setCurrentView('playlist-detail');
+    setUserView('playlist-detail');
   };
 
   const handleSelectArtist = (artist: Artist) => {
     setSelectedArtist(artist);
-    setCurrentView('artist-detail');
+    setUserView('artist-detail');
   };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col antialiased selection:bg-emerald-500 selection:text-black">
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar */}
-        <Sidebar
-          currentView={currentView}
-          onNavigate={setCurrentView}
+        {/* User Dedicated Sidebar (NO ADMIN CLUTTER) */}
+        <UserSidebar
+          currentView={userView}
+          onNavigate={setUserView}
           isOpenMobile={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
           onCreatePlaylist={() => {
-            setCurrentView('playlists');
+            setUserView('playlists');
             setIsCreatePlaylistModalOpen(true);
           }}
         />
@@ -93,8 +138,8 @@ function AppContent() {
         <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto">
           {/* Top Sticky Navbar */}
           <Navbar
-            currentView={currentView}
-            onNavigate={setCurrentView}
+            currentView={userView}
+            onNavigate={setUserView}
             onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
             onOpenBackendModal={() => setIsBackendModalOpen(true)}
             searchQuery={searchQuery}
@@ -103,15 +148,15 @@ function AppContent() {
 
           {/* Page View Body */}
           <main className="flex-1 px-4 md:px-8 py-6 pb-32 max-w-7xl w-full mx-auto">
-            {currentView === 'home' && (
+            {userView === 'home' && (
               <UserHomeView
-                onNavigate={setCurrentView}
+                onNavigate={setUserView}
                 onSelectPlaylist={handleSelectPlaylist}
                 onSelectArtist={handleSelectArtist}
               />
             )}
 
-            {currentView === 'search' && (
+            {userView === 'search' && (
               <SearchPageView
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
@@ -120,7 +165,20 @@ function AppContent() {
               />
             )}
 
-            {currentView === 'playlists' && (
+            {userView === 'artists' && (
+              <ArtistsView onSelectArtist={handleSelectArtist} />
+            )}
+
+            {userView === 'artist-detail' && selectedArtist && (
+              <ArtistProfileView
+                artist={selectedArtist}
+                onBack={() => setUserView('artists')}
+              />
+            )}
+
+            {userView === 'ai-chat' && <AIChatView />}
+
+            {userView === 'playlists' && (
               <PlaylistsView
                 onSelectPlaylist={handleSelectPlaylist}
                 isCreateModalOpen={isCreatePlaylistModalOpen}
@@ -128,44 +186,16 @@ function AppContent() {
               />
             )}
 
-            {currentView === 'playlist-detail' && selectedPlaylist && (
+            {userView === 'playlist-detail' && selectedPlaylist && (
               <PlaylistDetailView
                 playlist={selectedPlaylist}
-                onBack={() => setCurrentView('playlists')}
+                onBack={() => setUserView('playlists')}
               />
             )}
 
-            {currentView === 'liked-songs' && <LikedSongsView />}
+            {userView === 'liked-songs' && <LikedSongsView />}
 
-            {currentView === 'artists' && (
-              <ArtistsView onSelectArtist={handleSelectArtist} />
-            )}
-
-            {currentView === 'artist-detail' && selectedArtist && (
-              <ArtistProfileView
-                artist={selectedArtist}
-                onBack={() => setCurrentView('artists')}
-              />
-            )}
-
-            {currentView === 'profile' && <UserProfileView />}
-
-            {currentView === 'admin-dashboard' && (
-              <AdminDashboardView
-                onNavigate={setCurrentView}
-                onOpenBackendModal={() => setIsBackendModalOpen(true)}
-              />
-            )}
-
-            {currentView === 'music-management' && <MusicManagementView />}
-
-            {currentView === 'artist-management' && <ArtistManagementView />}
-
-            {currentView === 'user-management' && <UserManagementView />}
-
-            {currentView === 'banned-users' && <BannedUsersView />}
-
-            {currentView === 'genre-management' && <GenreManagementView />}
+            {userView === 'profile' && <UserProfileView />}
           </main>
         </div>
       </div>
@@ -173,7 +203,7 @@ function AppContent() {
       {/* Persistent Bottom Audio Player Bar */}
       <PlayerBar />
 
-      {/* Global Modals & Drawers */}
+      {/* Audio Drawers & Modals */}
       <QueueDrawer />
       <LyricsModal />
       <FullscreenPlayer />

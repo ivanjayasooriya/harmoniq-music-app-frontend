@@ -1,11 +1,14 @@
 import {
+  ActivityItem,
+  APIResponse,
   Artist,
+  BanAppeal,
   DashboardStats,
   Genre,
   Playlist,
   Track,
   User,
-  UserRole
+  UserRole,
 } from '../types';
 import {
   INITIAL_ARTISTS,
@@ -16,9 +19,9 @@ import {
   INITIAL_USERS,
 } from './mockData';
 
-const STORAGE_KEY_API_URL = 'soundwave_backend_url';
-const STORAGE_KEY_USE_MOCK = 'soundwave_use_mock';
-const STORAGE_KEY_TOKEN = 'soundwave_auth_token';
+const STORAGE_KEY_API_URL = 'harmoniq_backend_url';
+const STORAGE_KEY_USE_MOCK = 'harmoniq_use_mock';
+const STORAGE_KEY_TOKEN = 'harmoniq_auth_token';
 
 export const getStoredBackendUrl = (): string => {
   return localStorage.getItem(STORAGE_KEY_API_URL) || 'http://localhost:8080/api';
@@ -30,7 +33,6 @@ export const setStoredBackendUrl = (url: string) => {
 
 export const isMockModeEnabled = (): boolean => {
   const val = localStorage.getItem(STORAGE_KEY_USE_MOCK);
-  // Default to true if not explicitly set so the UI always works smoothly even without the user's local server running
   return val === null ? true : val === 'true';
 };
 
@@ -50,7 +52,7 @@ export const setAuthToken = (token: string | null) => {
   }
 };
 
-// In-memory state persistent across sessions via localStorage
+// Persistence helper for local storage
 const loadLocal = <T>(key: string, defaultVal: T): T => {
   try {
     const raw = localStorage.getItem(key);
@@ -68,13 +70,13 @@ const saveLocal = <T>(key: string, val: T) => {
   }
 };
 
-// Local storage state keys
-const LOCAL_TRACKS_KEY = 'soundwave_data_tracks';
-const LOCAL_PLAYLISTS_KEY = 'soundwave_data_playlists';
-const LOCAL_ARTISTS_KEY = 'soundwave_data_artists';
-const LOCAL_GENRES_KEY = 'soundwave_data_genres';
-const LOCAL_USERS_KEY = 'soundwave_data_users';
-const LOCAL_LIKED_KEY = 'soundwave_liked_track_ids';
+const LOCAL_TRACKS_KEY = 'harmoniq_data_tracks';
+const LOCAL_PLAYLISTS_KEY = 'harmoniq_data_playlists';
+const LOCAL_ARTISTS_KEY = 'harmoniq_data_artists';
+const LOCAL_GENRES_KEY = 'harmoniq_data_genres';
+const LOCAL_USERS_KEY = 'harmoniq_data_users';
+const LOCAL_LIKED_KEY = 'harmoniq_liked_track_ids';
+const LOCAL_APPEALS_KEY = 'harmoniq_ban_appeals';
 
 let localTracks: Track[] = loadLocal(LOCAL_TRACKS_KEY, INITIAL_TRACKS);
 let localPlaylists: Playlist[] = loadLocal(LOCAL_PLAYLISTS_KEY, INITIAL_PLAYLISTS);
@@ -82,6 +84,7 @@ let localArtists: Artist[] = loadLocal(LOCAL_ARTISTS_KEY, INITIAL_ARTISTS);
 let localGenres: Genre[] = loadLocal(LOCAL_GENRES_KEY, INITIAL_GENRES);
 let localUsers: User[] = loadLocal(LOCAL_USERS_KEY, INITIAL_USERS);
 let localLikedIds: string[] = loadLocal(LOCAL_LIKED_KEY, ['trk-1', 'trk-2', 'trk-3']);
+let localAppeals: BanAppeal[] = loadLocal(LOCAL_APPEALS_KEY, []);
 
 const persist = () => {
   saveLocal(LOCAL_TRACKS_KEY, localTracks);
@@ -90,11 +93,12 @@ const persist = () => {
   saveLocal(LOCAL_GENRES_KEY, localGenres);
   saveLocal(LOCAL_USERS_KEY, localUsers);
   saveLocal(LOCAL_LIKED_KEY, localLikedIds);
+  saveLocal(LOCAL_APPEALS_KEY, localAppeals);
 };
 
-// Helper fetcher with backend check
+// Smart fetch with unwrapping of Spring Boot APIResponse<T>
 async function apiRequest<T>(
-  endpoint: string,
+  endpoints: string | string[],
   options: RequestInit = {},
   fallbackFn: () => Promise<T> | T
 ): Promise<T> {
@@ -102,7 +106,7 @@ async function apiRequest<T>(
     return fallbackFn();
   }
 
-  const baseUrl = getStoredBackendUrl();
+  const baseUrl = getStoredBackendUrl().replace(/\/+$/, '');
   const token = getAuthToken();
   const headers = new Headers(options.headers || {});
   headers.set('Content-Type', 'application/json');
@@ -110,46 +114,57 @@ async function apiRequest<T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(`${baseUrl}${endpoint}`, {
-      ...options,
-      headers,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+  const endpointList = Array.isArray(endpoints) ? endpoints : [endpoints];
 
-    if (!res.ok) {
-      throw new Error(`API error ${res.status}: ${res.statusText}`);
+  for (const ep of endpointList) {
+    try {
+      const url = `${baseUrl}${ep.startsWith('/') ? ep : `/${ep}`}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(url, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const json = await res.json();
+        // Unwrap APIResponse<T> { data: ... } if present
+        if (json && typeof json === 'object' && 'data' in json && json.data !== undefined) {
+          return json.data as T;
+        }
+        return json as T;
+      }
+    } catch {
+      // try next endpoint or fallback
     }
-    return (await res.json()) as T;
-  } catch (err) {
-    console.warn(`[SoundWave Backend] Could not connect to SpringBoot at ${baseUrl}${endpoint}, using mock fallback.`, err);
-    return fallbackFn();
   }
+
+  return fallbackFn();
 }
 
 export const api = {
-  // Backend Connection Test
   checkBackendHealth: async (): Promise<{ ok: boolean; message: string; latencyMs: number }> => {
     const start = performance.now();
-    const baseUrl = getStoredBackendUrl();
+    const baseUrl = getStoredBackendUrl().replace(/\/+$/, '');
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3500);
       const res = await fetch(`${baseUrl}/health`, {
         method: 'GET',
         signal: controller.signal,
-      }).catch(() => fetch(`${baseUrl.replace('/api', '')}/actuator/health`, {
-        method: 'GET',
-        signal: controller.signal,
-      }));
+      }).catch(() =>
+        fetch(`${baseUrl.replace('/api', '')}/actuator/health`, {
+          method: 'GET',
+          signal: controller.signal,
+        })
+      );
       clearTimeout(timeoutId);
 
       const latencyMs = Math.round(performance.now() - start);
       if (res && res.ok) {
-        return { ok: true, message: `Connected to Spring Boot successfully (${latencyMs}ms)`, latencyMs };
+        return { ok: true, message: `Connected to HarmoniQ Spring Boot backend (${latencyMs}ms)`, latencyMs };
       }
       return { ok: false, message: `Server replied with status ${res?.status || 'unreachable'}`, latencyMs };
     } catch (err: unknown) {
@@ -157,73 +172,102 @@ export const api = {
       const errorMsg = err instanceof Error ? err.message : 'Connection failed';
       return {
         ok: false,
-        message: `Unable to reach Spring Boot at ${baseUrl} (${errorMsg}). Switch to Mock Mode for instant preview.`,
+        message: `Could not reach Spring Boot at ${baseUrl} (${errorMsg}). Mock mode active.`,
         latencyMs,
       };
     }
   },
 
-  // Auth & User Profile
+  // AuthController endpoints
   auth: {
-    login: async (email: string, _password?: string): Promise<{ token: string; user: User }> => {
+    login: async (email: string, password?: string): Promise<{ token: string; user: User }> => {
       return apiRequest(
-        '/auth/login',
-        { method: 'POST', body: JSON.stringify({ email, password: _password }) },
+        ['/auth/signin', '/auth/login'],
+        {
+          method: 'POST',
+          body: JSON.stringify({ email, username: email, password: password || '123456' }),
+        },
         async () => {
-          const user = localUsers.find((u) => u.email.toLowerCase() === email.toLowerCase()) || localUsers[0];
-          const token = `mock-jwt-token-${user.id}-${Date.now()}`;
+          const user =
+            localUsers.find((u) => u.email.toLowerCase() === email.toLowerCase()) ||
+            localUsers[0];
+          const token = `harmoniq-jwt-${user.id}-${Date.now()}`;
           setAuthToken(token);
           return { token, user };
         }
       );
     },
 
-    register: async (data: { email: string; username: string; fullName: string; role?: UserRole }): Promise<{ token: string; user: User }> => {
+    register: async (data: {
+      email: string;
+      username: string;
+      fullName: string;
+      password?: string;
+      role?: UserRole;
+    }): Promise<{ token: string; user: User }> => {
       return apiRequest(
-        '/auth/register',
-        { method: 'POST', body: JSON.stringify(data) },
+        ['/auth/signup', '/auth/register'],
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            email: data.email,
+            userName: data.username,
+            name: data.fullName,
+            password: data.password || 'password123',
+            role: data.role || 'USER',
+          }),
+        },
         async () => {
           const newUser: User = {
             id: `usr-${Date.now()}`,
             username: data.username,
             email: data.email,
             fullName: data.fullName,
-            avatarUrl: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80`,
+            avatarUrl:
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
             role: data.role || 'USER',
             isBanned: false,
-            plan: 'Free',
+            plan: 'Premium HiFi',
             favoriteGenres: ['Synthwave & Electronic', 'Pop & Modern Hits'],
             totalHoursListened: 0,
             createdAt: new Date().toISOString().split('T')[0],
           };
           localUsers.push(newUser);
           persist();
-          const token = `mock-jwt-token-${newUser.id}-${Date.now()}`;
+          const token = `harmoniq-jwt-${newUser.id}-${Date.now()}`;
           setAuthToken(token);
           return { token, user: newUser };
         }
       );
     },
 
-    forgotPassword: async (email: string): Promise<{ success: boolean; message: string }> => {
+    sendOtp: async (email: string): Promise<{ success: boolean; message: string }> => {
       return apiRequest(
-        '/auth/forgot-password',
-        { method: 'POST', body: JSON.stringify({ email }) },
-        async () => ({ success: true, message: `Password reset instructions sent to ${email}` })
+        ['/email/send-otp', '/auth/forgot-password'],
+        { method: 'POST', body: JSON.stringify({ email, recipient: email }) },
+        async () => ({ success: true, message: `Verification OTP dispatched to ${email}` })
       );
     },
 
-    resetPassword: async (_token: string, _newPass: string): Promise<{ success: boolean; message: string }> => {
+    verifyOtp: async (otp: string): Promise<{ success: boolean }> => {
       return apiRequest(
-        '/auth/reset-password',
-        { method: 'POST', body: JSON.stringify({ token: _token, newPassword: _newPass }) },
-        async () => ({ success: true, message: 'Password has been updated successfully.' })
+        ['/email/verify-otp', '/auth/validate-otp'],
+        { method: 'POST', body: JSON.stringify({ otp }) },
+        async () => ({ success: true })
+      );
+    },
+
+    resetPassword: async (otp: string, newPass: string): Promise<{ success: boolean }> => {
+      return apiRequest(
+        ['/auth/reset-password'],
+        { method: 'POST', body: JSON.stringify({ otp, newPassword: newPass }) },
+        async () => ({ success: true })
       );
     },
 
     updateProfile: async (userId: string, data: Partial<User>): Promise<User> => {
       return apiRequest(
-        `/users/${userId}`,
+        [`/user/update/${userId}`, `/user/${userId}`],
         { method: 'PUT', body: JSON.stringify(data) },
         async () => {
           const idx = localUsers.findIndex((u) => u.id === userId);
@@ -238,38 +282,38 @@ export const api = {
     },
   },
 
-  // Tracks API
+  // MusicController endpoints
   tracks: {
     getAll: async (): Promise<Track[]> => {
-      return apiRequest('/tracks', { method: 'GET' }, () => [...localTracks]);
-    },
-
-    getById: async (id: string): Promise<Track | undefined> => {
-      return apiRequest(`/tracks/${id}`, { method: 'GET' }, () => localTracks.find((t) => t.id === id));
+      return apiRequest(['/music/all', '/tracks'], { method: 'GET' }, () => [...localTracks]);
     },
 
     search: async (query: string): Promise<Track[]> => {
-      return apiRequest(`/tracks/search?q=${encodeURIComponent(query)}`, { method: 'GET' }, () => {
-        const q = query.toLowerCase();
-        return localTracks.filter(
-          (t) =>
-            t.title.toLowerCase().includes(q) ||
-            t.artist.toLowerCase().includes(q) ||
-            t.album.toLowerCase().includes(q) ||
-            t.genre.toLowerCase().includes(q)
-        );
-      });
+      return apiRequest(
+        [`/music/search?query=${encodeURIComponent(query)}`, `/tracks/search?q=${encodeURIComponent(query)}`],
+        { method: 'GET' },
+        () => {
+          const q = query.toLowerCase();
+          return localTracks.filter(
+            (t) =>
+              t.title.toLowerCase().includes(q) ||
+              t.artist.toLowerCase().includes(q) ||
+              t.album.toLowerCase().includes(q) ||
+              t.genre.toLowerCase().includes(q)
+          );
+        }
+      );
     },
 
     getLikedTracks: async (): Promise<Track[]> => {
-      return apiRequest('/tracks/liked', { method: 'GET' }, () => {
+      return apiRequest(['/liked/all', '/tracks/liked'], { method: 'GET' }, () => {
         return localTracks.filter((t) => localLikedIds.includes(t.id));
       });
     },
 
-    toggleLike: async (trackId: string): Promise<{ liked: boolean; totalLikes: number }> => {
+    toggleLike: async (trackId: string): Promise<{ liked: boolean }> => {
       return apiRequest(
-        `/tracks/${trackId}/like`,
+        [`/liked/toggle/${trackId}`, `/tracks/${trackId}/like`],
         { method: 'POST' },
         () => {
           const exists = localLikedIds.includes(trackId);
@@ -283,14 +327,14 @@ export const api = {
             trk.likes += exists ? -1 : 1;
           }
           persist();
-          return { liked: !exists, totalLikes: trk ? trk.likes : 0 };
+          return { liked: !exists };
         }
       );
     },
 
     createTrack: async (trackData: Omit<Track, 'id' | 'plays' | 'likes'>): Promise<Track> => {
       return apiRequest(
-        '/tracks',
+        ['/music/add', '/tracks'],
         { method: 'POST', body: JSON.stringify(trackData) },
         () => {
           const newTrack: Track = {
@@ -308,7 +352,7 @@ export const api = {
 
     updateTrack: async (id: string, data: Partial<Track>): Promise<Track> => {
       return apiRequest(
-        `/tracks/${id}`,
+        [`/music/update/${id}`, `/tracks/${id}`],
         { method: 'PUT', body: JSON.stringify(data) },
         () => {
           const idx = localTracks.findIndex((t) => t.id === id);
@@ -324,7 +368,7 @@ export const api = {
 
     deleteTrack: async (id: string): Promise<boolean> => {
       return apiRequest(
-        `/tracks/${id}`,
+        [`/music/delete/${id}`, `/tracks/${id}`],
         { method: 'DELETE' },
         () => {
           localTracks = localTracks.filter((t) => t.id !== id);
@@ -336,19 +380,87 @@ export const api = {
     },
   },
 
-  // Playlists API
-  playlists: {
-    getAll: async (): Promise<Playlist[]> => {
-      return apiRequest('/playlists', { method: 'GET' }, () => [...localPlaylists]);
+  // ArtistController & FollowedArtistController
+  artists: {
+    getAll: async (): Promise<Artist[]> => {
+      return apiRequest(['/artist/all', '/artists'], { method: 'GET' }, () => [...localArtists]);
     },
 
-    getById: async (id: string): Promise<Playlist | undefined> => {
-      return apiRequest(`/playlists/${id}`, { method: 'GET' }, () => localPlaylists.find((p) => p.id === id));
+    toggleFollow: async (artistId: string): Promise<{ followed: boolean }> => {
+      return apiRequest(
+        [`/artist/follow/${artistId}`, `/artists/${artistId}/follow`],
+        { method: 'POST' },
+        () => {
+          const art = localArtists.find((a) => a.id === artistId);
+          if (art) {
+            art.followed = !art.followed;
+            art.monthlyListeners += art.followed ? 1 : -1;
+            persist();
+            return { followed: !!art.followed };
+          }
+          return { followed: false };
+        }
+      );
+    },
+
+    createArtist: async (data: Omit<Artist, 'id' | 'monthlyListeners' | 'albumsCount' | 'tracksCount'>): Promise<Artist> => {
+      return apiRequest(
+        ['/artist/add', '/artists'],
+        { method: 'POST', body: JSON.stringify(data) },
+        () => {
+          const newArtist: Artist = {
+            ...data,
+            id: `art-${Date.now()}`,
+            monthlyListeners: 1400,
+            albumsCount: 1,
+            tracksCount: 1,
+            followed: false,
+          };
+          localArtists.push(newArtist);
+          persist();
+          return newArtist;
+        }
+      );
+    },
+
+    updateArtist: async (id: string, data: Partial<Artist>): Promise<Artist> => {
+      return apiRequest(
+        [`/artist/update/${id}`, `/artists/${id}`],
+        { method: 'PUT', body: JSON.stringify(data) },
+        () => {
+          const idx = localArtists.findIndex((a) => a.id === id);
+          if (idx !== -1) {
+            localArtists[idx] = { ...localArtists[idx], ...data };
+            persist();
+            return localArtists[idx];
+          }
+          throw new Error('Artist not found');
+        }
+      );
+    },
+
+    deleteArtist: async (id: string): Promise<boolean> => {
+      return apiRequest(
+        [`/artist/delete/${id}`, `/artists/${id}`],
+        { method: 'DELETE' },
+        () => {
+          localArtists = localArtists.filter((a) => a.id !== id);
+          persist();
+          return true;
+        }
+      );
+    },
+  },
+
+  // PlaylistController & PlaylistSongController
+  playlists: {
+    getAll: async (): Promise<Playlist[]> => {
+      return apiRequest(['/playlist/all', '/playlists'], { method: 'GET' }, () => [...localPlaylists]);
     },
 
     create: async (data: { title: string; description: string; coverUrl?: string; isPublic?: boolean }): Promise<Playlist> => {
       return apiRequest(
-        '/playlists',
+        ['/playlist/create', '/playlists'],
         { method: 'POST', body: JSON.stringify(data) },
         () => {
           const newPl: Playlist = {
@@ -372,25 +484,9 @@ export const api = {
       );
     },
 
-    update: async (id: string, data: Partial<Playlist>): Promise<Playlist> => {
-      return apiRequest(
-        `/playlists/${id}`,
-        { method: 'PUT', body: JSON.stringify(data) },
-        () => {
-          const idx = localPlaylists.findIndex((p) => p.id === id);
-          if (idx !== -1) {
-            localPlaylists[idx] = { ...localPlaylists[idx], ...data };
-            persist();
-            return localPlaylists[idx];
-          }
-          throw new Error('Playlist not found');
-        }
-      );
-    },
-
     delete: async (id: string): Promise<boolean> => {
       return apiRequest(
-        `/playlists/${id}`,
+        [`/playlist/delete/${id}`, `/playlists/${id}`],
         { method: 'DELETE' },
         () => {
           localPlaylists = localPlaylists.filter((p) => p.id !== id);
@@ -402,8 +498,8 @@ export const api = {
 
     addTrack: async (playlistId: string, track: Track): Promise<Playlist> => {
       return apiRequest(
-        `/playlists/${playlistId}/tracks`,
-        { method: 'POST', body: JSON.stringify({ trackId: track.id }) },
+        ['/playlist/song/add', `/playlists/${playlistId}/tracks`],
+        { method: 'POST', body: JSON.stringify({ playlistId, songId: track.id, trackId: track.id }) },
         () => {
           const pl = localPlaylists.find((p) => p.id === playlistId);
           if (pl) {
@@ -421,7 +517,7 @@ export const api = {
 
     removeTrack: async (playlistId: string, trackId: string): Promise<Playlist> => {
       return apiRequest(
-        `/playlists/${playlistId}/tracks/${trackId}`,
+        [`/playlist/song/delete/${playlistId}/${trackId}`, `/playlists/${playlistId}/tracks/${trackId}`],
         { method: 'DELETE' },
         () => {
           const pl = localPlaylists.find((p) => p.id === playlistId);
@@ -437,98 +533,20 @@ export const api = {
     },
   },
 
-  // Artists API
-  artists: {
-    getAll: async (): Promise<Artist[]> => {
-      return apiRequest('/artists', { method: 'GET' }, () => [...localArtists]);
-    },
-
-    getById: async (id: string): Promise<Artist | undefined> => {
-      return apiRequest(`/artists/${id}`, { method: 'GET' }, () => localArtists.find((a) => a.id === id));
-    },
-
-    toggleFollow: async (artistId: string): Promise<{ followed: boolean }> => {
-      return apiRequest(
-        `/artists/${artistId}/follow`,
-        { method: 'POST' },
-        () => {
-          const art = localArtists.find((a) => a.id === artistId);
-          if (art) {
-            art.followed = !art.followed;
-            art.monthlyListeners += art.followed ? 1 : -1;
-            persist();
-            return { followed: !!art.followed };
-          }
-          return { followed: false };
-        }
-      );
-    },
-
-    createArtist: async (data: Omit<Artist, 'id' | 'monthlyListeners' | 'albumsCount' | 'tracksCount'>): Promise<Artist> => {
-      return apiRequest(
-        '/artists',
-        { method: 'POST', body: JSON.stringify(data) },
-        () => {
-          const newArtist: Artist = {
-            ...data,
-            id: `art-${Date.now()}`,
-            monthlyListeners: 1200,
-            albumsCount: 1,
-            tracksCount: 1,
-            followed: false,
-          };
-          localArtists.push(newArtist);
-          persist();
-          return newArtist;
-        }
-      );
-    },
-
-    updateArtist: async (id: string, data: Partial<Artist>): Promise<Artist> => {
-      return apiRequest(
-        `/artists/${id}`,
-        { method: 'PUT', body: JSON.stringify(data) },
-        () => {
-          const idx = localArtists.findIndex((a) => a.id === id);
-          if (idx !== -1) {
-            localArtists[idx] = { ...localArtists[idx], ...data };
-            persist();
-            return localArtists[idx];
-          }
-          throw new Error('Artist not found');
-        }
-      );
-    },
-
-    deleteArtist: async (id: string): Promise<boolean> => {
-      return apiRequest(
-        `/artists/${id}`,
-        { method: 'DELETE' },
-        () => {
-          localArtists = localArtists.filter((a) => a.id !== id);
-          persist();
-          return true;
-        }
-      );
-    },
-  },
-
-  // Genres API
+  // GenreController
   genres: {
     getAll: async (): Promise<Genre[]> => {
-      return apiRequest('/genres', { method: 'GET' }, () => [...localGenres]);
+      return apiRequest(['/genre/all', '/genre/with-track-count', '/genres'], { method: 'GET' }, () => [
+        ...localGenres,
+      ]);
     },
 
     create: async (data: Omit<Genre, 'id' | 'trackCount'>): Promise<Genre> => {
       return apiRequest(
-        '/genres',
+        ['/genre/add', '/genres'],
         { method: 'POST', body: JSON.stringify(data) },
         () => {
-          const newG: Genre = {
-            ...data,
-            id: `g-${Date.now()}`,
-            trackCount: 0,
-          };
+          const newG: Genre = { ...data, id: `g-${Date.now()}`, trackCount: 0 };
           localGenres.push(newG);
           persist();
           return newG;
@@ -538,7 +556,7 @@ export const api = {
 
     delete: async (id: string): Promise<boolean> => {
       return apiRequest(
-        `/genres/${id}`,
+        [`/genre/delete/${id}`, `/genres/${id}`],
         { method: 'DELETE' },
         () => {
           localGenres = localGenres.filter((g) => g.id !== id);
@@ -549,10 +567,10 @@ export const api = {
     },
   },
 
-  // Admin & User Management
+  // UserController & UserBanController & ActivityController
   admin: {
     getStats: async (): Promise<DashboardStats> => {
-      return apiRequest('/admin/stats', { method: 'GET' }, () => ({
+      return apiRequest(['/activity/all', '/admin/stats'], { method: 'GET' }, () => ({
         ...INITIAL_DASHBOARD_STATS,
         totalTracks: localTracks.length + 45200,
         totalArtists: localArtists.length + 1835,
@@ -561,16 +579,12 @@ export const api = {
     },
 
     getUsers: async (): Promise<User[]> => {
-      return apiRequest('/admin/users', { method: 'GET' }, () => [...localUsers]);
-    },
-
-    getBannedUsers: async (): Promise<User[]> => {
-      return apiRequest('/admin/users/banned', { method: 'GET' }, () => localUsers.filter((u) => u.isBanned));
+      return apiRequest(['/user/all', '/admin/users'], { method: 'GET' }, () => [...localUsers]);
     },
 
     updateUserRole: async (userId: string, role: UserRole): Promise<User> => {
       return apiRequest(
-        `/admin/users/${userId}/role`,
+        [`/user/role/${userId}`, `/admin/users/${userId}/role`],
         { method: 'PUT', body: JSON.stringify({ role }) },
         () => {
           const user = localUsers.find((u) => u.id === userId);
@@ -584,10 +598,16 @@ export const api = {
       );
     },
 
+    getBannedUsers: async (): Promise<User[]> => {
+      return apiRequest(['/ban/all', '/admin/users/banned'], { method: 'GET' }, () =>
+        localUsers.filter((u) => u.isBanned)
+      );
+    },
+
     banUser: async (userId: string, reason: string): Promise<User> => {
       return apiRequest(
-        `/admin/users/${userId}/ban`,
-        { method: 'POST', body: JSON.stringify({ reason }) },
+        ['/ban/user', `/admin/users/${userId}/ban`],
+        { method: 'POST', body: JSON.stringify({ userId, reason }) },
         () => {
           const user = localUsers.find((u) => u.id === userId);
           if (user) {
@@ -604,7 +624,7 @@ export const api = {
 
     unbanUser: async (userId: string): Promise<User> => {
       return apiRequest(
-        `/admin/users/${userId}/unban`,
+        [`/ban/unban/${userId}`, `/admin/users/${userId}/unban`],
         { method: 'POST' },
         () => {
           const user = localUsers.find((u) => u.id === userId);
@@ -616,6 +636,44 @@ export const api = {
             return user;
           }
           throw new Error('User not found');
+        }
+      );
+    },
+
+    submitBanAppeal: async (data: { userId: string; username: string; reason: string }): Promise<BanAppeal> => {
+      return apiRequest(
+        ['/ban/appeal'],
+        { method: 'POST', body: JSON.stringify(data) },
+        () => {
+          const appeal: BanAppeal = {
+            id: `app-${Date.now()}`,
+            userId: data.userId,
+            username: data.username,
+            reason: data.reason,
+            status: 'PENDING',
+            createdAt: new Date().toISOString(),
+          };
+          localAppeals.push(appeal);
+          persist();
+          return appeal;
+        }
+      );
+    },
+  },
+
+  // AI Chat (ChatController.java)
+  chat: {
+    sendPrompt: async (message: string): Promise<{ reply: string }> => {
+      return apiRequest(
+        ['/chat', '/api/chat'],
+        { method: 'POST', body: JSON.stringify({ message, prompt: message }) },
+        async () => {
+          const replies = [
+            `Based on your taste in synthwave and ambient beats, you will love "Neon Skyline" by Aether Echoes! Would you like me to queue it up?`,
+            `I recommend diving into Solaris Drift's "Midnight Rain In Shibuya" for a focused study or work session.`,
+            `Nova Eclipse just released "Starlight Gravity" in ultra lossless master quality. Great choice for high-energy afternoons!`,
+          ];
+          return { reply: replies[Math.floor(Math.random() * replies.length)] };
         }
       );
     },

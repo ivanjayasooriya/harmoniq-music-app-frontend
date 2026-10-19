@@ -2,69 +2,70 @@ import React, { useState } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
+  Headphones,
   KeyRound,
   Lock,
   Mail,
-  Radio,
   Shield,
   Sparkles,
   User as UserIcon,
 } from 'lucide-react';
+import { HarmoniQLogo } from '../components/HarmoniQLogo';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { UserRole, ViewMode } from '../types';
+import { AuthMode, UserRole } from '../types';
 
 interface AuthViewsProps {
-  mode: 'sign-in' | 'sign-up' | 'forgot-password';
-  onNavigate: (view: ViewMode) => void;
+  mode: AuthMode;
+  onSwitchMode: (mode: AuthMode) => void;
 }
 
-export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
+export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onSwitchMode }) => {
   const { login, register } = useAuth();
 
-  // Sign In state
+  // Login target portal choice: Listener vs Admin
+  const [targetPortal, setTargetPortal] = useState<'user' | 'admin'>('user');
+
+  // Sign In credentials
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Sign Up state
+  // Sign Up credentials
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
-  const [role, setRole] = useState<UserRole>('USER');
+  const [signUpRole, setSignUpRole] = useState<UserRole>('USER');
 
-  // Forgot Password / Email page state
+  // Forgot password flow
   const [forgotEmail, setForgotEmail] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [step, setStep] = useState<'request' | 'verify' | 'done'>('request');
+  const [otpStep, setOtpStep] = useState<'send' | 'verify' | 'done'>('send');
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Sign In handler
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     try {
       setLoading(true);
-      await login(email, password);
-      onNavigate('home');
+      await login(email, password, targetPortal);
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Invalid credentials. Please check your login details.');
+      setErrorMsg(err instanceof Error ? err.message : 'Invalid credentials. Please verify your login details.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Quick Demo fill
-  const handleDemoSignIn = async (asAdmin: boolean) => {
+  const handleQuickDemo = async (isAdmin: boolean) => {
     setErrorMsg('');
     try {
       setLoading(true);
-      if (asAdmin) {
-        await login('ivanjayasooriya03@gmail.com', 'admin123');
+      if (isAdmin) {
+        await login('ivanjayasooriya03@gmail.com', 'admin123', 'admin');
       } else {
-        await login('sarah.k@example.com', 'user123');
+        await login('sarah.k@example.com', 'user123', 'user');
       }
-      onNavigate('home');
     } catch (err) {
       console.error(err);
     } finally {
@@ -72,7 +73,6 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
     }
   };
 
-  // Sign Up handler
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -82,9 +82,8 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
         fullName: fullName.trim(),
         username: username.trim(),
         email: email.trim(),
-        role,
+        role: signUpRole,
       });
-      onNavigate('home');
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Registration failed.');
     } finally {
@@ -92,45 +91,38 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
     }
   };
 
-  // Forgot Password handler
-  const handleRequestReset = async (e: React.FormEvent) => {
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!forgotEmail.trim()) return;
     setLoading(true);
-    await api.auth.forgotPassword(forgotEmail);
+    await api.auth.sendOtp(forgotEmail);
     setLoading(false);
-    setStep('verify');
+    setOtpStep('verify');
   };
 
-  const handleVerifyAndReset = async (e: React.FormEvent) => {
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!verificationCode.trim() || !newPassword.trim()) return;
+    if (!otpCode.trim() || !newPassword.trim()) return;
     setLoading(true);
-    await api.auth.resetPassword(verificationCode, newPassword);
+    await api.auth.resetPassword(otpCode, newPassword);
     setLoading(false);
-    setStep('done');
+    setOtpStep('done');
   };
 
   return (
-    <div className="min-h-[85vh] flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-zinc-950/80 border border-zinc-800 rounded-3xl p-8 shadow-2xl space-y-6 relative overflow-hidden animate-in zoom-in-95 duration-200">
-        {/* Glow */}
-        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-60 h-60 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none" />
+    <div className="min-h-screen flex items-center justify-center p-4 bg-zinc-950 text-zinc-100 relative overflow-hidden">
+      {/* Background ambient lighting */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full bg-emerald-500/10 blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-indigo-500/10 blur-[100px] pointer-events-none" />
 
-        {/* Brand Header */}
-        <div className="text-center space-y-2">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/25">
-            <Radio className="w-6 h-6 text-black" />
-          </div>
-          <h2 className="text-2xl font-extrabold text-white tracking-tight">
-            {mode === 'sign-in' && 'Welcome to SoundWave'}
-            {mode === 'sign-up' && 'Create Your Account'}
-            {mode === 'forgot-password' && 'Password Recovery'}
-          </h2>
-          <p className="text-xs text-zinc-400">
-            {mode === 'sign-in' && 'Stream lossless high-fidelity audio on any device'}
-            {mode === 'sign-up' && 'Join millions of music lovers and independent artists'}
-            {mode === 'forgot-password' && 'Enter your email to receive a verification reset code'}
+      <div className="w-full max-w-md bg-zinc-900/80 backdrop-blur-xl border border-zinc-800 rounded-3xl p-8 shadow-2xl space-y-6 relative z-10 animate-in zoom-in-95 duration-200">
+        {/* Brand Logo */}
+        <div className="text-center flex flex-col items-center space-y-3">
+          <HarmoniQLogo size="lg" />
+          <p className="text-xs text-zinc-400 max-w-xs">
+            {mode === 'sign-in' && 'Choose your portal and sign in to continue'}
+            {mode === 'sign-up' && 'Create your account for master audio streaming'}
+            {mode === 'forgot-password' && 'Password recovery with OTP verification'}
           </p>
         </div>
 
@@ -140,9 +132,44 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
           </div>
         )}
 
-        {/* SIGN IN FORM */}
+        {/* SIGN IN */}
         {mode === 'sign-in' && (
           <div className="space-y-4">
+            {/* PORTAL SEPARATION TABS */}
+            <div className="grid grid-cols-2 p-1 rounded-2xl bg-zinc-950 border border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setTargetPortal('user')}
+                className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition ${
+                  targetPortal === 'user'
+                    ? 'bg-emerald-500 text-black shadow-md shadow-emerald-500/20'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Headphones className="w-3.5 h-3.5" />
+                <span>Listener App</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTargetPortal('admin')}
+                className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition ${
+                  targetPortal === 'admin'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span>Admin Backstage</span>
+              </button>
+            </div>
+
+            <div className="text-[11px] text-zinc-400 text-center font-mono">
+              {targetPortal === 'user'
+                ? 'Streaming player, playlists, and personal favorites'
+                : 'Catalog uploads, artist roster, bans, and system metrics'}
+            </div>
+
             <form onSubmit={handleSignIn} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">
@@ -156,7 +183,7 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@domain.com"
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
@@ -168,7 +195,7 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                   </label>
                   <button
                     type="button"
-                    onClick={() => onNavigate('forgot-password')}
+                    onClick={() => onSwitchMode('forgot-password')}
                     className="text-[11px] text-emerald-400 hover:underline"
                   >
                     Forgot password?
@@ -182,7 +209,7 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
@@ -190,48 +217,59 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition shadow-lg shadow-emerald-500/20 active:scale-95 disabled:opacity-50"
+                className={`w-full py-2.5 rounded-xl font-bold text-xs transition shadow-lg active:scale-95 disabled:opacity-50 ${
+                  targetPortal === 'admin'
+                    ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20'
+                }`}
               >
-                {loading ? 'Authenticating...' : 'Sign In'}
+                {loading
+                  ? 'Connecting to Spring Boot...'
+                  : targetPortal === 'admin'
+                  ? 'Sign In to Admin Portal'
+                  : 'Sign In as Listener'}
               </button>
             </form>
 
-            {/* Quick Demo Sign In Options */}
+            {/* Quick 1-click Demo Fillers */}
             <div className="pt-2 border-t border-zinc-800 space-y-2">
-              <p className="text-[11px] text-zinc-500 text-center font-semibold uppercase tracking-wider">
-                Instant Demo Access
+              <p className="text-[10px] text-zinc-500 text-center font-semibold uppercase tracking-wider">
+                Instant One-Click Login
               </p>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => handleDemoSignIn(true)}
-                  className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition"
+                  onClick={() => handleQuickDemo(false)}
+                  className="p-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-semibold transition flex items-center justify-center gap-1.5"
                 >
-                  Sign in as Admin
+                  <Headphones className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Demo Listener</span>
                 </button>
+
                 <button
                   type="button"
-                  onClick={() => handleDemoSignIn(false)}
-                  className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-semibold transition"
+                  onClick={() => handleQuickDemo(true)}
+                  className="p-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-indigo-300 border border-indigo-900/60 text-xs font-semibold transition flex items-center justify-center gap-1.5"
                 >
-                  Sign in as User
+                  <Shield className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Demo Admin</span>
                 </button>
               </div>
             </div>
 
             <div className="text-center pt-2">
-              <span className="text-xs text-zinc-500">Don't have an account? </span>
+              <span className="text-xs text-zinc-500">Need an account? </span>
               <button
-                onClick={() => onNavigate('sign-up')}
+                onClick={() => onSwitchMode('sign-up')}
                 className="text-xs text-emerald-400 font-semibold hover:underline"
               >
-                Sign Up Free
+                Sign Up
               </button>
             </div>
           </div>
         )}
 
-        {/* SIGN UP FORM */}
+        {/* SIGN UP */}
         {mode === 'sign-up' && (
           <form onSubmit={handleSignUp} className="space-y-3.5">
             <div>
@@ -246,7 +284,7 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Ivan Jayasooriya"
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
                 />
               </div>
             </div>
@@ -261,7 +299,7 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="ivanj"
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
               />
             </div>
 
@@ -277,23 +315,22 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@domain.com"
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
                 />
               </div>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">
-                Role Purpose
+                Account Purpose
               </label>
               <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as UserRole)}
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                value={signUpRole}
+                onChange={(e) => setSignUpRole(e.target.value as UserRole)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
               >
-                <option value="USER">Listener / Music Enthusiast</option>
-                <option value="ARTIST">Artist / Music Producer</option>
-                <option value="ADMIN">Studio Administrator</option>
+                <option value="USER">Music Listener (Listener App)</option>
+                <option value="ADMIN">Studio Administrator (Admin Portal)</option>
               </select>
             </div>
 
@@ -302,14 +339,14 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
               disabled={loading}
               className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition shadow-lg shadow-emerald-500/20 active:scale-95 disabled:opacity-50"
             >
-              {loading ? 'Creating Account...' : 'Complete Sign Up'}
+              {loading ? 'Creating Account in Spring Boot...' : 'Create Account'}
             </button>
 
             <div className="text-center pt-2">
-              <span className="text-xs text-zinc-500">Already registered? </span>
+              <span className="text-xs text-zinc-500">Already have an account? </span>
               <button
                 type="button"
-                onClick={() => onNavigate('sign-in')}
+                onClick={() => onSwitchMode('sign-in')}
                 className="text-xs text-emerald-400 font-semibold hover:underline"
               >
                 Sign In
@@ -318,11 +355,11 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
           </form>
         )}
 
-        {/* FORGOT PASSWORD & EMAIL RECOVERY FLOW */}
+        {/* FORGOT PASSWORD */}
         {mode === 'forgot-password' && (
           <div className="space-y-4">
-            {step === 'request' && (
-              <form onSubmit={handleRequestReset} className="space-y-3.5">
+            {otpStep === 'send' && (
+              <form onSubmit={handleSendOtp} className="space-y-3.5">
                 <div>
                   <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">
                     Your Registered Email
@@ -335,7 +372,7 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
                       placeholder="you@domain.com"
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                 </div>
@@ -345,31 +382,31 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                   disabled={loading}
                   className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition shadow-lg shadow-emerald-500/20 active:scale-95"
                 >
-                  Send Verification Code
+                  {loading ? 'Dispatching OTP...' : 'Send Verification OTP'}
                 </button>
               </form>
             )}
 
-            {step === 'verify' && (
-              <form onSubmit={handleVerifyAndReset} className="space-y-3.5">
+            {otpStep === 'verify' && (
+              <form onSubmit={handleVerifyOtp} className="space-y-3.5">
                 <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-emerald-300 text-xs">
-                  A 6-digit confirmation code was dispatched to {forgotEmail}. Use demo code{' '}
+                  An OTP verification code was sent to {forgotEmail}. Use demo code{' '}
                   <strong className="font-mono text-white">123456</strong>.
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">
-                    6-Digit Verification Code
+                    OTP Code
                   </label>
                   <div className="relative">
                     <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
                       required
-                      value={verificationCode}
-                      onChange={(e) => setVerificationCode(e.target.value)}
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value)}
                       placeholder="123456"
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white font-mono placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white font-mono placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                 </div>
@@ -386,7 +423,7 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                 </div>
@@ -396,20 +433,20 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
                   disabled={loading}
                   className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition shadow-lg shadow-emerald-500/20 active:scale-95"
                 >
-                  Set New Password
+                  Reset & Save Password
                 </button>
               </form>
             )}
 
-            {step === 'done' && (
-              <div className="p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-center space-y-3">
+            {otpStep === 'done' && (
+              <div className="p-6 rounded-2xl bg-zinc-900 border border-zinc-800 text-center space-y-3">
                 <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto" />
-                <h3 className="font-bold text-base text-white">Password Updated!</h3>
+                <h3 className="font-bold text-base text-white">Password Updated</h3>
                 <p className="text-xs text-zinc-400">
-                  Your credentials have been securely updated in the backend. You can now log in.
+                  Your credentials have been securely updated. You can now sign in.
                 </p>
                 <button
-                  onClick={() => onNavigate('sign-in')}
+                  onClick={() => onSwitchMode('sign-in')}
                   className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition"
                 >
                   Return to Sign In
@@ -420,7 +457,7 @@ export const AuthViews: React.FC<AuthViewsProps> = ({ mode, onNavigate }) => {
             <div className="text-center pt-2">
               <button
                 type="button"
-                onClick={() => onNavigate('sign-in')}
+                onClick={() => onSwitchMode('sign-in')}
                 className="text-xs text-zinc-400 hover:text-white flex items-center justify-center gap-1.5 mx-auto"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
